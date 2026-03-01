@@ -13,7 +13,7 @@
 #   You should have received a copy of the GNU Affero General Public License
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ... import _debug, _dummydata
+from ... import _debug, get_dummydata
 
 try:
     from .j2534 import phys as j2534_phys
@@ -35,10 +35,15 @@ def get_all_interfaces():
     """
     ifaces = {}
 
+    if get_dummydata():
+        from ...tests.comms.phy.phy_mock import MockDevice
+        ifaces.update({'Mock Interface': set([MockDevice])})
+        return ifaces
+
     ifaces.update(j2534_phys)
     ifaces.update(linux_phys)
 
-    if _debug or _dummydata:
+    if _debug:
         from ...tests.comms.phy.phy_mock import MockDevice
         ifaces.update({'Mock Interface': set([MockDevice])})
 

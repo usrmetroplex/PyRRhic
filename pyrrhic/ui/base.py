@@ -245,6 +245,9 @@ class bLoggerFrame ( BaseFrame ):
         self._protocol_choice = wx.Choice( self._toolbar, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, _protocol_choiceChoices, 0 )
         self._protocol_choice.SetSelection( 0 )
         self._toolbar.AddControl( self._protocol_choice )
+        self._dummy_mode_chk = wx.CheckBox( self._toolbar, wx.ID_ANY, u"Dummy Mode", wx.DefaultPosition, wx.DefaultSize, 0 )
+        self._dummy_mode_chk.SetValue(True)
+        self._toolbar.AddControl( self._dummy_mode_chk )
         self._connect_but = wx.Button( self._toolbar, wx.ID_ANY, u"Connect", wx.DefaultPosition, wx.DefaultSize, 0 )
         self._connect_but.Enable( False )
 
@@ -297,6 +300,7 @@ class bLoggerFrame ( BaseFrame ):
         self.Bind( wx.EVT_TOOL, self.OnRefreshInterfaces, id = self._refresh_but.GetId() )
         self._iface_choice.Bind( wx.EVT_CHOICE, self.OnSelectInterface )
         self._protocol_choice.Bind( wx.EVT_CHOICE, self.OnSelectProtocol )
+        self._dummy_mode_chk.Bind( wx.EVT_CHECKBOX, self.OnToggleDummyMode )
         self._connect_but.Bind( wx.EVT_BUTTON, self.OnConnectButton )
         self._disconnect_but.Bind( wx.EVT_BUTTON, self.OnDisconnectButton )
         self._log_but.Bind( wx.EVT_BUTTON, self.OnToggleLogButton )
@@ -322,6 +326,9 @@ class bLoggerFrame ( BaseFrame ):
         event.Skip()
 
     def OnSelectProtocol( self, event ):
+        event.Skip()
+
+    def OnToggleDummyMode( self, event ):
         event.Skip()
 
     def OnConnectButton( self, event ):

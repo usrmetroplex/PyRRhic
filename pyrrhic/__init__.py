@@ -16,10 +16,12 @@
 import os
 import sys
 
-submod_dir = os.path.join(
-    os.path.dirname(__file__),
-    '..', 'submodules'
-)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    _base_dir = sys._MEIPASS
+else:
+    _base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+submod_dir = os.path.join(_base_dir, 'submodules')
 
 # add J2534 submodule to PYTHONPATH
 sys.path.insert(0,
@@ -28,3 +30,10 @@ sys.path.insert(0,
 
 _debug = False
 _dummydata = True
+
+def set_dummydata(enabled):
+    global _dummydata
+    _dummydata = bool(enabled)
+
+def get_dummydata():
+    return _dummydata

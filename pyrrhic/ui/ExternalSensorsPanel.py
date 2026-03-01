@@ -22,7 +22,7 @@ import wx
 from pubsub import pub
 from wx import dataview as dv
 
-from .. import _dummydata
+from .. import get_dummydata
 
 try:
     serial = importlib.import_module('serial')
@@ -117,7 +117,7 @@ class ExternalSensorParam(object):
         if self._enabled:
             return True
 
-        if not _dummydata and self._sensor_type == 'AEM X WideBand Series':
+        if not get_dummydata() and self._sensor_type == 'AEM X WideBand Series':
             try:
                 self._open_serial()
             except Exception as e:
@@ -149,7 +149,7 @@ class ExternalSensorParam(object):
             self._value = None
             return
 
-        if _dummydata:
+        if get_dummydata():
             if self._sensor_type == 'AEM X WideBand Series':
                 self._value = random.uniform(13.5, 15.5)
             else:

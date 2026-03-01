@@ -168,8 +168,19 @@ class PyrrhicController(object):
         return ret
 
     def spawn_logger(self, interface_name, protocol_name):
-        iface_phys = self._available_interfaces[interface_name]
-        protocol, translator = get_all_protocols()[protocol_name]
+        iface_phys = self._available_interfaces.get(interface_name)
+        if iface_phys is None:
+            pub.sendMessage('logger.status', center='Selected interface is not available', temporary=True)
+            pub.sendMessage('logger.connection.change', connected=False)
+            return
+
+        protocols = get_all_protocols()
+        if protocol_name not in protocols:
+            pub.sendMessage('logger.status', center='Selected protocol is not available', temporary=True)
+            pub.sendMessage('logger.connection.change', connected=False)
+            return
+
+        protocol, translator = protocols[protocol_name]
 
         # get specific `CommunicationDevice` subclass for this protocol
         phy = list(protocol._supported_phy.intersection(iface_phys))[0]

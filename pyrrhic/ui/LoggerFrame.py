@@ -22,6 +22,7 @@ from wx.aui import AUI_BUTTON_STATE_NORMAL, AUI_BUTTON_STATE_DISABLED
 
 from .base import bLoggerFrame
 from .PrefsDialog import PrefsDialog
+from .. import get_dummydata, set_dummydata
 
 class LoggerFrame(bLoggerFrame):
     def __init__(self, parent, controller):
@@ -76,6 +77,8 @@ class LoggerFrame(bLoggerFrame):
         pub.subscribe(self.on_connection, 'logger.connection.change')
 
         self._build_logger_menu()
+        self._dummy_mode_chk.SetToolTip('Enable or disable mock/dummy data mode')
+        self._dummy_mode_chk.SetValue(get_dummydata())
         self.OnRefreshInterfaces()
         self._update_logger_menu_state(False)
 
@@ -238,6 +241,7 @@ class LoggerFrame(bLoggerFrame):
         )
         self._iface_choice.SetSelection(len(self._iface_choice.Items) - 1)
         self.OnSelectInterface()
+        self._update_dummy_mode_visibility()
 
     def OnSelectInterface(self, event=None):
         self._protocol_choice.Clear()
@@ -256,13 +260,59 @@ class LoggerFrame(bLoggerFrame):
             self._protocol_choice.SetSelection(0)
 
         self.OnSelectProtocol()
+        self._update_dummy_mode_visibility()
 
     def OnSelectProtocol(self, event=None):
         self._connect_but.Enable(
             self._protocol_choice.GetStringSelection() != self._protocol_text
         )
+        self._update_dummy_mode_visibility()
+
+    def _is_mock_selection(self):
+        return (
+            self._iface_choice.GetStringSelection() == 'Mock Interface'
+            and self._protocol_choice.GetStringSelection() == 'Mock SSM'
+        )
+
+    def _update_dummy_mode_visibility(self):
+        self._dummy_mode_chk.SetValue(get_dummydata())
+        self._dummy_mode_chk.Show(True)
+        self._dummy_mode_chk.Enable(True)
+        self._toolbar.Realize()
+
+    def OnToggleDummyMode(self, event):
+        enabled = self._dummy_mode_chk.GetValue()
+        was_mock_selection = self._is_mock_selection()
+
+        if (not enabled) and was_mock_selection and (
+            self._controller.IsLoggerConnected or self._connection_pending
+        ):
+            self.OnDisconnectButton(None)
+
+        set_dummydata(enabled)
+        self.OnRefreshInterfaces()
+        self.push_status(
+            center='Dummy Mode {}'.format('ON' if enabled else 'OFF'),
+            temporary=True,
+        )
 
     def OnConnectButton(self, event):
+        iface = self._iface_choice.GetStringSelection()
+        protocol = self._protocol_choice.GetStringSelection()
+
+        if iface == self._iface_text or protocol == self._protocol_text:
+            self.push_status(center='Select interface and protocol', temporary=True)
+            return
+
+        supported = self._controller.get_supported_protocols(iface)
+        if protocol not in supported:
+            self.push_status(
+                center='Protocol no longer available, refreshing list',
+                temporary=True,
+            )
+            self.OnRefreshInterfaces()
+            return
+
         # lock toolbar controls during connection startup
         self._connection_pending = True
         self._disable_toolbar_controls()
@@ -272,8 +322,6 @@ class LoggerFrame(bLoggerFrame):
         self._connect_but.SetLabelText(self._connecting_text)
 
         # spawn a logger thread
-        iface = self._iface_choice.GetStringSelection()
-        protocol = self._protocol_choice.GetStringSelection()
         self._controller.spawn_logger(iface, protocol)
 
     def OnDisconnectButton(self, event):
