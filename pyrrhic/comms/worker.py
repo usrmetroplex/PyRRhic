@@ -130,11 +130,19 @@ class CommsWorker(PyrrhicWorker):
         try:
             resp = self._protocol.identify_endpoint(self._current_endpoint)
         except Exception as e:
+            # Clear initialized state if identification fails
             self._state &= ~CommsState.INITIALIZED
             return
 
+        # Guard against None response - endpoint identification unsuccessful
+        if resp is None:
+            self._state &= ~CommsState.INITIALIZED
+            return
+
+        # Build initialization data tuple and notify UI of successful endpoint init
         init_data = (self._protocol.Protocol, self._current_endpoint, *resp)
         self._out_q.put(PyrrhicMessage('Init', init_data))
+        # Mark endpoint as initialized and ready for queries
         self._state |= CommsState.INITIALIZED
 
     def _set_endpoint(self, endpoint):

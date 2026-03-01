@@ -16,6 +16,9 @@
 import json
 import logging
 import os
+import csv
+import re
+from datetime import datetime, timedelta
 
 from pubsub import pub
 
@@ -55,6 +58,13 @@ class PyrrhicController(object):
         self._logger_frame = logger_frame
         self._comms_worker = None
         self._comms_translator = None
+        self._logger_connect_started = None
+        self._logger_connect_timeout = timedelta(seconds=10)
+        self._csv_log_fp = None
+        self._csv_log_writer = None
+        self._csv_log_params = []
+        self._csv_log_started_at = None
+        self._external_log_params = []
 
         self._defmgr = DefinitionManager(
             ecuflashRoot=self._prefs['ECUFlashRepo'].Value,
@@ -63,6 +73,7 @@ class PyrrhicController(object):
 
         pub.subscribe(self.live_tune_pull, 'livetune.state.pull.init')
         pub.subscribe(self.live_tune_push, 'livetune.state.push.init')
+        pub.subscribe(self.update_external_log_params, 'logger.external.updated')
 
         self.refresh_interfaces()
 
@@ -163,27 +174,63 @@ class PyrrhicController(object):
         # get specific `CommunicationDevice` subclass for this protocol
         phy = list(protocol._supported_phy.intersection(iface_phys))[0]
 
-        # create the worker and spawn the new thread
-        self._comms_worker= CommsWorker(interface_name, phy, protocol)
-        self._comms_worker.start()
+        try:
+            # create the worker and spawn the new thread
+            self._comms_worker = CommsWorker(interface_name, phy, protocol)
+            self._comms_worker.start()
+            self._logger_connect_started = datetime.now()
 
-        # instantiate the appropriate `EndpointTranslator`
-        self._comms_translator = translator()
+            # instantiate the appropriate `EndpointTranslator`
+            self._comms_translator = translator()
+
+        except Exception as e:
+            self._comms_worker = None
+            self._comms_translator = None
+            self._logger_connect_started = None
+
+            err = str(e)
+            if (
+                'ERR_DEVICE_NOT_CONNECTED' in err
+                or 'Device ID invalid' in err
+            ):
+                msg = 'Device not found'
+                _logger.error(msg)
+            else:
+                msg = 'Logger connection failed'
+                _logger.error('{}: {}'.format(msg, err))
+
+            pub.sendMessage('logger.status', center=msg, temporary=True)
+            pub.sendMessage('logger.connection.change', connected=False)
 
     def kill_logger(self):
+        was_connected = (
+            self._comms_translator is not None
+            and self._comms_translator.Definition is not None
+        )
+        self._logger_connect_started = None
+
         if self._comms_worker:
             _logger.debug('Killing communication thread')
 
             # signal comms thread to stop
             self._comms_worker.join()
 
-            _logger.info('Logger disconnected')
+            if was_connected:
+                _logger.info('Logger disconnected')
+            else:
+                _logger.info('Logger connect attempt cancelled')
+                pub.sendMessage(
+                    'logger.status',
+                    center='Connection cancelled',
+                    temporary=True
+                )
             self._comms_worker = None
 
         pub.sendMessage('logger.connection.change', connected=False)
 
         # remove all parameters from UI
         pub.sendMessage('logger.query.updated', params=[])
+        self.stop_log()
         if self._comms_translator:
             for p in (
                 self._comms_translator.EnabledParams
@@ -196,6 +243,21 @@ class PyrrhicController(object):
     def check_comms(self):
         "Idle event handler that checks logging thread for updates."
         if self._comms_worker is not None:
+            if (
+                self._logger_connect_started is not None
+                and self._comms_translator is not None
+                and self._comms_translator.Definition is None
+                and (datetime.now() - self._logger_connect_started) > self._logger_connect_timeout
+            ):
+                _logger.warning('Connection timeout')
+                pub.sendMessage(
+                    'logger.status',
+                    center='Connection timeout - no endpoint response',
+                    temporary=True
+                )
+                self.kill_logger()
+                return
+
             try:
                 item = self._comms_worker.OutQueue.get(False)
             except Empty as e:
@@ -221,6 +283,7 @@ class PyrrhicController(object):
                         avg_freq=self._comms_translator.AverageFreq
                     )
                     pub.sendMessage('logger.params.updated')
+                    self._write_csv_log_row(time)
 
                 elif msg == 'LiveTuneResponse':
 
@@ -278,6 +341,92 @@ class PyrrhicController(object):
                 )
                 pub.sendMessage('livetune.state.pending')
 
+    def start_log(self, filepath=None):
+        if filepath is None:
+            filepath = self._generate_log_filepath()
+
+        if not self.IsLoggerConnected:
+            raise RuntimeError('Logger is not connected')
+
+        if self.IsLogging:
+            raise RuntimeError('CSV logging is already active')
+
+        params = (
+            self._comms_translator.EnabledParams
+            + self._comms_translator.EnabledSwitches
+            + self._external_log_params
+        )
+        if not params:
+            raise ValueError('No parameters selected. Enable at least one parameter before starting log.')
+
+        self._csv_log_params = list(params)
+        self._csv_log_started_at = datetime.now()
+        self._csv_log_fp = open(filepath, 'w', newline='', encoding='utf-8')
+        self._csv_log_writer = csv.writer(self._csv_log_fp)
+        headers = ['Time (msec)', *[p.Name for p in self._csv_log_params]]
+        self._csv_log_writer.writerow(headers)
+        self._csv_log_fp.flush()
+        _logger.info('Started CSV logging: {}'.format(filepath))
+        return filepath
+
+    def update_external_log_params(self, params):
+        self._external_log_params = list(params) if params else []
+
+    def _generate_log_filepath(self):
+        log_dir = self._prefs['LogOutputDir'].Value
+        if not log_dir or not os.path.isdir(log_dir):
+            raise RuntimeError('Invalid logger output directory in preferences')
+
+        append = self._prefs['LogFileAppend'].Value or ''
+        append = append.strip()
+        append = re.sub(r'[<>:"/\\|?*]+', '_', append)
+
+        timestamp = datetime.now().strftime('%d%m%Y%H%M')
+        base_name = '{}_{}'.format(append, timestamp) if append else timestamp
+
+        fpath = os.path.join(log_dir, '{}.csv'.format(base_name))
+        seq = 1
+        while os.path.exists(fpath):
+            fpath = os.path.join(log_dir, '{}_{}.csv'.format(base_name, seq))
+            seq += 1
+
+        return fpath
+
+    def stop_log(self):
+        if self._csv_log_fp is not None:
+            try:
+                self._csv_log_fp.close()
+            except Exception:
+                pass
+
+        self._csv_log_fp = None
+        self._csv_log_writer = None
+        self._csv_log_params = []
+        self._csv_log_started_at = None
+
+    def _write_csv_log_row(self, timestamp):
+        if not self.IsLogging:
+            return
+
+        try:
+            if self._csv_log_started_at is None:
+                self._csv_log_started_at = timestamp
+
+            elapsed_ms = int((timestamp - self._csv_log_started_at).total_seconds() * 1000)
+            vals = [
+                p.ValueStr if p is not None and p.ValueStr is not None else ''
+                for p in self._csv_log_params
+            ]
+
+            row = [elapsed_ms, *vals]
+            self._csv_log_writer.writerow(row)
+            self._csv_log_fp.flush()
+
+        except Exception as e:
+            _logger.error('CSV logging failed: {}'.format(str(e)))
+            self.stop_log()
+            pub.sendMessage('logger.status', center='CSV logging stopped (write error)', temporary=True)
+
     def live_tune_push(self):
         if self._comms_worker is not None:
 
@@ -317,6 +466,7 @@ class PyrrhicController(object):
             )
 
             self._comms_translator.Definition = definition
+            self._logger_connect_started = None
             pub.sendMessage('logger.connection.change', translator=self._comms_translator)
 
             # check if a ROM corresponding to the initialized ECU has been loaded
@@ -404,3 +554,15 @@ class PyrrhicController(object):
     @property
     def CommsWorker(self):
         return self._comms_worker
+
+    @property
+    def IsLoggerConnected(self):
+        return (
+            self._comms_worker is not None
+            and self._comms_translator is not None
+            and self._comms_translator.Definition is not None
+        )
+
+    @property
+    def IsLogging(self):
+        return self._csv_log_writer is not None

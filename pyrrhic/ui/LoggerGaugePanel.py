@@ -24,11 +24,24 @@ class LoggerGaugePanel(bLoggerGaugePanel):
     def __init__(self, *args):
         super(LoggerGaugePanel, self).__init__(*args)
         self._gauge_map = {}
+        self._ecu_params = []
+        self._external_params = []
 
         pub.subscribe(self.update_gauges, 'logger.query.updated')
+        pub.subscribe(self.update_external_gauges, 'logger.external.updated')
         pub.subscribe(self.refresh_gauges, 'logger.params.updated')
+        pub.subscribe(self.refresh_gauges, 'logger.external.params.updated')
 
     def update_gauges(self, params):
+        self._ecu_params = list(params)
+        self._rebuild_gauges()
+
+    def update_external_gauges(self, params):
+        self._external_params = list(params)
+        self._rebuild_gauges()
+
+    def _rebuild_gauges(self):
+        params = self._ecu_params + self._external_params
 
         sz = self.GetSizer()
         sz.Clear()

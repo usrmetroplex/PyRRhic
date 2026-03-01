@@ -13,6 +13,7 @@ from .ConsolePanel import ConsolePanel
 from .BaseFrame import BaseFrame
 from .LoggerParamPanel import LoggerParamPanel
 from .LoggerGaugePanel import LoggerGaugePanel
+from .ExternalSensorsPanel import ExternalSensorsPanel
 import wx
 import wx.xrc
 import wx.propgrid as pg
@@ -248,18 +249,47 @@ class bLoggerFrame ( BaseFrame ):
         self._connect_but.Enable( False )
 
         self._toolbar.AddControl( self._connect_but )
+        self._disconnect_but = wx.Button( self._toolbar, wx.ID_ANY, u"Cancel", wx.DefaultPosition, wx.DefaultSize, 0 )
+        self._disconnect_but.Enable( False )
+
+        self._toolbar.AddControl( self._disconnect_but )
+        self._toolbar.AddStretchSpacer()
+        self._log_but = wx.Button( self._toolbar, wx.ID_ANY, u"Start Log", wx.DefaultPosition, wx.Size( 140,36 ), 0 )
+        self._log_but.Enable( False )
+
+        self._toolbar.AddControl( self._log_but )
         self._toolbar.Realize()
         self.m_mgr.AddPane( self._toolbar, wx.aui.AuiPaneInfo().Bottom().CaptionVisible( False ).CloseButton( False ).PinButton( True ).Movable( False ).Dock().Resizable().FloatingSize( wx.DefaultSize ).LeftDockable( False ).RightDockable( False ).Layer( 10 ) )
 
         self._statusbar = self.CreateStatusBar( 3, wx.STB_DEFAULT_STYLE, wx.ID_ANY )
-        self._param_panel = LoggerParamPanel( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
-        self.m_mgr.AddPane( self._param_panel, wx.aui.AuiPaneInfo() .Left() .Caption( u"Parameters" ).Dock().Resizable().FloatingSize( wx.DefaultSize ).BottomDockable( False ).TopDockable( False ).MinSize( wx.Size( 200,-1 ) ).Layer( 10 ) )
+        self._left_panel = wx.Panel( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+        _left_sizer = wx.BoxSizer( wx.VERTICAL )
 
-        self._gauge_panel = LoggerGaugePanel( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
-        self.m_mgr.AddPane( self._gauge_panel, wx.aui.AuiPaneInfo() .Center() .Caption( u"Gauges" ).CloseButton( False ).Dock().Resizable().FloatingSize( wx.DefaultSize ).BottomDockable( False ).TopDockable( False ).Floatable( False ).DefaultPane() )
+        self._left_splitter = wx.SplitterWindow( self._left_panel, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.SP_LIVE_UPDATE )
+        self._left_splitter.SetMinimumPaneSize( 120 )
+
+        self._param_panel = LoggerParamPanel( self._left_splitter, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+        self._external_sensor_panel = ExternalSensorsPanel( self._left_splitter, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+        self._left_splitter.SplitHorizontally( self._param_panel, self._external_sensor_panel )
+        self._left_splitter.SetSashGravity( 0.7 )
+
+        _left_sizer.Add( self._left_splitter, 1, wx.EXPAND, 5 )
+        self._left_panel.SetSizer( _left_sizer )
+        self._left_panel.Layout()
+
+        self.m_mgr.AddPane( self._left_panel, wx.aui.AuiPaneInfo() .Left() .Caption( u"Parameters / External Sensors" ).Dock().Resizable().FloatingSize( wx.DefaultSize ).BottomDockable( False ).TopDockable( False ).MinSize( wx.Size( 240,-1 ) ).Layer( 10 ) )
+
+        self._logger_tabs = wx.Notebook( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, 0 )
+        self._gauge_panel = LoggerGaugePanel( self._logger_tabs, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+        self._graph_panel = wx.Panel( self._logger_tabs, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+        self._logger_tabs.AddPage( self._gauge_panel, u"Gauges", True )
+        self._logger_tabs.AddPage( self._graph_panel, u"Graphs", False )
+
+        self.m_mgr.AddPane( self._logger_tabs, wx.aui.AuiPaneInfo() .Center() .Caption( u"Logger" ).CloseButton( False ).Dock().Resizable().FloatingSize( wx.DefaultSize ).BottomDockable( False ).TopDockable( False ).Floatable( False ).DefaultPane() )
 
 
         self.m_mgr.Update()
+        wx.CallAfter( self._set_logger_splitter_ratio )
         self.Centre( wx.BOTH )
 
         # Connect Events
@@ -268,9 +298,16 @@ class bLoggerFrame ( BaseFrame ):
         self._iface_choice.Bind( wx.EVT_CHOICE, self.OnSelectInterface )
         self._protocol_choice.Bind( wx.EVT_CHOICE, self.OnSelectProtocol )
         self._connect_but.Bind( wx.EVT_BUTTON, self.OnConnectButton )
+        self._disconnect_but.Bind( wx.EVT_BUTTON, self.OnDisconnectButton )
+        self._log_but.Bind( wx.EVT_BUTTON, self.OnToggleLogButton )
 
     def __del__( self ):
         self.m_mgr.UnInit()
+
+    def _set_logger_splitter_ratio( self ):
+        h = self._left_splitter.GetClientSize().GetHeight()
+        if h > 0:
+            self._left_splitter.SetSashPosition( int( h*0.7 ) )
 
 
 
@@ -288,6 +325,12 @@ class bLoggerFrame ( BaseFrame ):
         event.Skip()
 
     def OnConnectButton( self, event ):
+        event.Skip()
+
+    def OnDisconnectButton( self, event ):
+        event.Skip()
+
+    def OnToggleLogButton( self, event ):
         event.Skip()
 
 
@@ -349,6 +392,3 @@ class bEditDialog ( wx.Dialog ):
 
     def OnCancel( self, event ):
         event.Skip()
-
-
-

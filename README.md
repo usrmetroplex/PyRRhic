@@ -30,3 +30,4 @@ To start the program from command-line, simply call it as a module:
 ```
 .../PyRRhic/ $ python -m pyrrhic
 ```
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser

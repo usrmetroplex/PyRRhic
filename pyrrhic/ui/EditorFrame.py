@@ -213,7 +213,11 @@ class EditorFrame(bEditorFrame):
             self.refresh_tree()
 
     def OnPreferences(self, event):
-        dlg = PrefsDialog(self, self._controller.Preferences)
+        dlg = PrefsDialog(
+            self,
+            self._controller.Preferences,
+            sections=['Editor', 'Log Colors']
+        )
         dlg.ShowModal()
         dlg.Destroy()
 

@@ -13,7 +13,7 @@
 #   You should have received a copy of the GNU Affero General Public License
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ... import _debug
+from ... import _debug, _dummydata
 from .base import TranslatorParseError
 from .ssm import protocols as ssm_protocols
 
@@ -29,7 +29,7 @@ def get_all_protocols():
 
     protocols.update(ssm_protocols)
 
-    if _debug:
+    if _debug or _dummydata:
         from ...tests.comms.protocol import _protocols as test_protocols
         protocols.update(test_protocols)
 

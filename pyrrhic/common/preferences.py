@@ -19,6 +19,7 @@ import os
 
 from collections.abc import MutableMapping
 
+from . import _logs_dir
 from .enums import UserLevel
 from .helpers import PyrrhicJSONSerializable
 
@@ -243,6 +244,18 @@ _default_prefs = [
             'fullpath': True,
             'style': 'open',
         }
+    ),
+    DirPreference(
+        'LogOutputDir',
+        label='Logger Output Directory',
+        help='Directory where CSV logger files are written',
+        value=_logs_dir,
+    ),
+    StringPreference(
+        'LogFileAppend',
+        label='Append',
+        help='Optional text prefix added before timestamp in CSV filename',
+        value='',
     ),
 
     CategoryPreference('Log Colors'),

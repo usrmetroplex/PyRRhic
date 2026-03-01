@@ -23,7 +23,7 @@ from .ViewModels import TranslatorViewModel, OptionalToggleRenderer
 class LoggerParamPanel(bLoggerParamPanel):
     def __init__(self, *args):
         super(LoggerParamPanel, self).__init__(*args)
-        self._controller = self.Parent.Controller
+        self._controller = self.GetTopLevelParent().Controller
 
     def initialize(self, translator):
         self._model = TranslatorViewModel(translator)
@@ -74,6 +74,37 @@ class LoggerParamPanel(bLoggerParamPanel):
 
     def update_model(self):
         self._model.Cleared()
+
+    def get_enabled_param_ids(self):
+        if not hasattr(self, '_model'):
+            return []
+
+        d = self._model.Translator.Definition.LoggerDef
+        if d is None:
+            return []
+
+        ids = []
+        for p in list(d.AllParameters.values()) + list(d.AllSwitches.values()):
+            if p.Enabled:
+                ids.append(p.Identifier)
+        return ids
+
+    def apply_enabled_param_ids(self, ids):
+        if not hasattr(self, '_model'):
+            return
+
+        d = self._model.Translator.Definition.LoggerDef
+        if d is None:
+            return
+
+        id_set = set(ids)
+        for p in list(d.AllParameters.values()) + list(d.AllSwitches.values()):
+            if p.Identifier in id_set:
+                p.enable()
+            else:
+                p.disable()
+
+        self.update_model()
 
     def OnSelectParam(self, event):
         pass

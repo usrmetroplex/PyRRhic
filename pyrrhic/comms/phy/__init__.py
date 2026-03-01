@@ -13,8 +13,17 @@
 #   You should have received a copy of the GNU Affero General Public License
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ... import _debug
-from .j2534 import phys as j2534_phys
+from ... import _debug, _dummydata
+
+try:
+    from .j2534 import phys as j2534_phys
+except Exception:
+    j2534_phys = {}
+
+try:
+    from .linux import phys as linux_phys
+except Exception:
+    linux_phys = {}
 
 def get_all_interfaces():
     """Get all interfaces available on the system.
@@ -27,8 +36,9 @@ def get_all_interfaces():
     ifaces = {}
 
     ifaces.update(j2534_phys)
+    ifaces.update(linux_phys)
 
-    if _debug:
+    if _debug or _dummydata:
         from ...tests.comms.phy.phy_mock import MockDevice
         ifaces.update({'Mock Interface': set([MockDevice])})
 

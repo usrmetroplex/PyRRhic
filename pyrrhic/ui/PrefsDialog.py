@@ -47,16 +47,35 @@ _fileprop_style_map = {
 }
 
 class PrefsDialog(bPrefsDialog):
-    def __init__(self, parent, prefMgr):
+    def __init__(self, parent, prefMgr, sections=None):
         super(PrefsDialog, self).__init__(parent)
         self._prefs = prefMgr
+        self._sections = set(sections) if sections else None
+        self._pref_names = self._resolve_pref_names()
 
         self._initialize()
+
+    def _resolve_pref_names(self):
+        if not self._sections:
+            return list(self._prefs.keys())
+
+        names = []
+        include = False
+        for name in self._prefs:
+            pref = self._prefs[name]
+            if isinstance(pref, CategoryPreference):
+                include = pref.Name in self._sections or pref.Label in self._sections
+                if include:
+                    names.append(name)
+            elif include:
+                names.append(name)
+
+        return names
 
     def _initialize(self):
         "Initialize PropertyGrid from the associated `PyrrhicPreferences` instance"
 
-        for name in self._prefs:
+        for name in self._pref_names:
             pref = self._prefs[name]
             label = pref.Label
             helpStr = pref.HelpText
@@ -110,7 +129,7 @@ class PrefsDialog(bPrefsDialog):
             self._PGM.Append(prop)
 
     def OnInitialize(self, event):
-        for name in self._prefs:
+        for name in self._pref_names:
             pref = self._prefs[name]
             label = pref.Label
             helpStr = pref.HelpText
@@ -118,7 +137,9 @@ class PrefsDialog(bPrefsDialog):
             val = pref.Value
             attribs = pref.Attributes
 
-            prop = self._PGM.GetPropertyByLabel(label)
+            prop = self._PGM.GetPropertyByName(name)
+            if prop is None:
+                continue
 
             if val is not None:
 
@@ -133,7 +154,7 @@ class PrefsDialog(bPrefsDialog):
         event.Skip()
 
     def OnCommit(self, event):
-        for name in self._prefs:
+        for name in self._pref_names:
             pref = self._prefs[name]
 
             # skip category headers

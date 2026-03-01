@@ -17,16 +17,26 @@ import logging
 import struct
 
 from itertools import groupby
-from PyJ2534 import IoctlParameter, ProtocolFlags
 from time import sleep
 
 from ... import _debug
 from ...common.enums import LoggerEndpoint, LoggerProtocol, _dtype_size_map
 from ...livetune import LiveTuneState, MerpModLiveTune
-from ..phy.j2534 import J2534PassThru_ISO9141
 from .base import (
     EndpointProtocol, EndpointTranslator, TranslatorParseError
 )
+
+try:
+    from PyJ2534 import IoctlParameter, ProtocolFlags
+    from ..phy.j2534 import J2534PassThru_ISO9141
+    _j2534_available = True
+    _j2534_import_error = None
+except Exception as e:
+    IoctlParameter = None
+    ProtocolFlags = None
+    J2534PassThru_ISO9141 = None
+    _j2534_available = False
+    _j2534_import_error = e
 
 _logger = logging.getLogger(__name__)
 
@@ -94,20 +104,28 @@ class SSMProtocol(EndpointProtocol):
 
 class SSM_ISO9141(SSMProtocol):
 
-    _supported_phy = set([J2534PassThru_ISO9141])
-    _phy_kwargs = {
-        J2534PassThru_ISO9141: {
-            'baud': 4800,
-            'flags': ProtocolFlags.ISO9141_NO_CHECKSUM,
-            'ioctl': {
-                IoctlParameter.P1_MAX: 1,
-                IoctlParameter.P3_MIN: 1,
-                IoctlParameter.P4_MIN: 0,
-            },
+    _supported_phy = set([J2534PassThru_ISO9141]) if _j2534_available else set()
+    _phy_kwargs = (
+        {
+            J2534PassThru_ISO9141: {
+                'baud': 4800,
+                'flags': ProtocolFlags.ISO9141_NO_CHECKSUM,
+                'ioctl': {
+                    IoctlParameter.P1_MAX: 1,
+                    IoctlParameter.P3_MIN: 1,
+                    IoctlParameter.P4_MIN: 0,
+                },
+            }
         }
-    }
+        if _j2534_available else {}
+    )
 
     def __init__(self, *args, delay=100, timeout=5000):
+        if not _j2534_available:
+            raise RuntimeError(
+                'J2534 backend unavailable: {}'.format(_j2534_import_error)
+            )
+
         # ensure physical interface and protocol are compatible
         phy_cls = args[1]
         if not phy_cls in self._supported_phy:
@@ -522,6 +540,7 @@ class SSMTranslator(EndpointTranslator):
     def LiveTuneData(self):
         return self._livetune
 
-protocols = {
-    'SSM (K-line)': (SSM_ISO9141, SSMTranslator)
-}
+protocols = (
+    {'SSM (K-line)': (SSM_ISO9141, SSMTranslator)}
+    if _j2534_available else {}
+)

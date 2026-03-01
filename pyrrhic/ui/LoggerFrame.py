@@ -14,12 +14,14 @@
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import wx
+import xml.etree.ElementTree as ET
 
 from pubsub import pub
 
 from wx.aui import AUI_BUTTON_STATE_NORMAL, AUI_BUTTON_STATE_DISABLED
 
 from .base import bLoggerFrame
+from .PrefsDialog import PrefsDialog
 
 class LoggerFrame(bLoggerFrame):
     def __init__(self, parent, controller):
@@ -27,8 +29,24 @@ class LoggerFrame(bLoggerFrame):
         super(LoggerFrame, self).__init__(parent)
 
         self._connect_text = 'Connect'
+        self._connecting_text = 'Connecting...'
+        self._cancel_text = 'Cancel'
         self._disconnect_text = 'Disconnect'
+        self._cancelling_text = 'Cancelling...'
+        self._disconnecting_text = 'Disconnecting...'
+        self._connection_pending = False
+        self._start_log_text = 'Start Log'
+        self._end_log_text = 'End Log'
         self._connect_but.SetLabelText(self._connect_text)
+        self._disconnect_but.SetLabelText(self._cancel_text)
+        self._disconnect_but.Disable()
+
+        self._log_but.SetLabelText(self._start_log_text)
+        self._log_but.SetMinSize(wx.Size(140, 36))
+        _log_font = self._log_but.GetFont()
+        _log_font.SetWeight(wx.FONTWEIGHT_BOLD)
+        self._log_but.SetFont(_log_font)
+        self._style_log_button(active=False)
 
         self._iface_text = 'Interface Selection'
         self._protocol_text = 'Protocol Selection'
@@ -37,6 +55,8 @@ class LoggerFrame(bLoggerFrame):
         self._left_status_timer = wx.Timer(self)
         self._center_status_timer = wx.Timer(self)
         self._right_status_timer = wx.Timer(self)
+        self._log_blink_timer = wx.Timer(self)
+        self._log_blink_on = False
 
         self.Bind(
             wx.EVT_TIMER, self._pop_left_status, self._left_status_timer
@@ -47,52 +67,138 @@ class LoggerFrame(bLoggerFrame):
         self.Bind(
             wx.EVT_TIMER, self._pop_right_status, self._right_status_timer
         )
+        self.Bind(
+            wx.EVT_TIMER, self._on_log_blink_timer, self._log_blink_timer
+        )
 
         pub.subscribe(self.push_status, 'logger.status')
         pub.subscribe(self.update_freq, 'logger.freq.updated')
         pub.subscribe(self.on_connection, 'logger.connection.change')
 
+        self._build_logger_menu()
         self.OnRefreshInterfaces()
+        self._update_logger_menu_state(False)
 
-    def _enable_toolbar_controls(self, enable=True, connect=False):
+    def _build_logger_menu(self):
+        self._logger_menu = wx.Menu()
+        self._mi_logger_prefs = self._logger_menu.Append(
+            wx.ID_ANY, 'Preferences', 'Open Logger preferences'
+        )
+        self._logger_menu.AppendSeparator()
+        self._mi_save_preset = self._logger_menu.Append(
+            wx.ID_ANY, 'Save Preset', 'Save selected params and external sensors to XML'
+        )
+        self._mi_import_preset = self._logger_menu.Append(
+            wx.ID_ANY, 'Import Preset', 'Import logger preset XML (connected ECU required)'
+        )
+        self._logger_menu.AppendSeparator()
+        self._mi_start_log = self._logger_menu.Append(
+            wx.ID_ANY, 'Start Log', 'Start CSV logging for selected logger parameters'
+        )
+        self._mi_stop_log = self._logger_menu.Append(
+            wx.ID_ANY, 'Stop Log', 'Stop active CSV logging'
+        )
+        self._menubar.Append(self._logger_menu, 'Logger')
+
+        self.Bind(wx.EVT_MENU, self.OnLoggerPreferences, id=self._mi_logger_prefs.GetId())
+        self.Bind(wx.EVT_MENU, self.OnSavePreset, id=self._mi_save_preset.GetId())
+        self.Bind(wx.EVT_MENU, self.OnImportPreset, id=self._mi_import_preset.GetId())
+        self.Bind(wx.EVT_MENU, self.OnStartLog, id=self._mi_start_log.GetId())
+        self.Bind(wx.EVT_MENU, self.OnStopLog, id=self._mi_stop_log.GetId())
+
+    def _update_logger_menu_state(self, connected):
+        logging = self._controller.IsLogging
+        self._mi_save_preset.Enable(connected)
+        self._mi_import_preset.Enable(connected)
+        self._mi_start_log.Enable(connected and not logging)
+        self._mi_stop_log.Enable(logging)
+        self._update_log_controls(connected, logging)
+
+    def _style_log_button(self, active=False):
+        if active:
+            bg = wx.Colour(231, 76, 60) if self._log_blink_on else wx.Colour(192, 57, 43)
+            self._log_but.SetBackgroundColour(bg)
+            self._log_but.SetForegroundColour(wx.WHITE)
+        else:
+            self._log_but.SetBackgroundColour(wx.Colour(46, 204, 113))
+            self._log_but.SetForegroundColour(wx.BLACK)
+        self._log_but.Refresh()
+
+    def _set_log_indicator(self, active=False):
+        self._statusbar.SetStatusText('● LOG REC' if active else '', i=1)
+
+    def _update_log_controls(self, connected, logging):
+        self._log_but.Enable(connected or logging)
+        self._log_but.SetLabelText(self._end_log_text if logging else self._start_log_text)
+
+        if logging:
+            if not self._log_blink_timer.IsRunning():
+                self._log_blink_on = False
+                self._log_blink_timer.Start(500)
+        else:
+            if self._log_blink_timer.IsRunning():
+                self._log_blink_timer.Stop()
+            self._log_blink_on = False
+
+        self._style_log_button(active=logging)
+        self._set_log_indicator(active=logging)
+
+    def _on_log_blink_timer(self, event):
+        self._log_blink_on = not self._log_blink_on
+        self._style_log_button(active=True)
+
+    def _enable_toolbar_controls(self, enable=True):
         if enable:
             self._refresh_but.SetState(AUI_BUTTON_STATE_NORMAL)
             self._iface_choice.Enable()
             self._protocol_choice.Enable()
-            if connect:
-                self._connect_but.Enable()
         else:
             self._refresh_but.SetState(AUI_BUTTON_STATE_DISABLED)
             self._iface_choice.Disable()
             self._protocol_choice.Disable()
-            if connect:
-                self._connect_but.Disable()
 
-    def _disable_toolbar_controls(self, connect=False):
-        self._enable_toolbar_controls(enable=False, connect=connect)
+    def _disable_toolbar_controls(self):
+        self._enable_toolbar_controls(enable=False)
+
+    def _safe_pop_status(self, field):
+        try:
+            self._statusbar.PopStatusText(field=field)
+        except wx.wxAssertionError:
+            self._statusbar.SetStatusText('', i=field)
 
     def _pop_left_status(self, event=None):
-        self._statusbar.PopStatusText(field=0)
+        self._safe_pop_status(0)
 
     def _pop_center_status(self, event=None):
-        self._statusbar.PopStatusText(field=1)
+        self._safe_pop_status(1)
 
     def _pop_right_status(self, event=None):
-        self._statusbar.PopStatusText(field=2)
+        self._safe_pop_status(2)
 
     def on_connection(self, connected=True, translator=None):
-        text = self._disconnect_text if connected else self._connect_text
-        self._connect_but.SetLabelText(text)
-        self._connect_but.Enable()
+        self._connection_pending = False
+        self._connect_but.SetLabelText(self._connect_text)
         self._enable_toolbar_controls(enable=not connected)
+        self._update_logger_menu_state(connected)
 
         if connected:
+            self._connect_but.Disable()
+            self._disconnect_but.SetLabelText(self._disconnect_text)
+            self._disconnect_but.Enable()
             self._param_panel.initialize(translator)
             self.push_status(left='ID: {}'.format(translator.Definition.LoggerDef.Identifier))
             self.push_status(left='Connected', temporary=True)
         else:
+            self._disconnect_but.SetLabelText(self._cancel_text)
+            self._disconnect_but.Disable()
             self._param_panel.clear()
+            self._center_status_timer.Stop()
+            self._right_status_timer.Stop()
+            self._statusbar.SetStatusText('', i=1)
+            self._statusbar.SetStatusText('', i=2)
             self._pop_left_status()
+            self.OnSelectProtocol()
+            self._update_log_controls(False, False)
 
     def push_status(self, left=None, center=None, right=None, temporary=False):
         """Push text to the corresponding portion of the status bar.
@@ -157,25 +263,154 @@ class LoggerFrame(bLoggerFrame):
         )
 
     def OnConnectButton(self, event):
-        # Attempt a logger connection
-        if self._connect_but.GetLabelText() == self._connect_text:
+        # lock toolbar controls during connection startup
+        self._connection_pending = True
+        self._disable_toolbar_controls()
+        self._connect_but.Disable()
+        self._disconnect_but.Enable()
+        self._disconnect_but.SetLabelText(self._cancel_text)
+        self._connect_but.SetLabelText(self._connecting_text)
 
-            # lock UI controls
-            self._disable_toolbar_controls(connect=True)
-            self._connect_but.SetLabelText('Connecting...')
+        # spawn a logger thread
+        iface = self._iface_choice.GetStringSelection()
+        protocol = self._protocol_choice.GetStringSelection()
+        self._controller.spawn_logger(iface, protocol)
 
-            # spawn a logger thread
-            iface = self._iface_choice.GetStringSelection()
-            protocol = self._protocol_choice.GetStringSelection()
-            self._controller.spawn_logger(iface, protocol)
+    def OnDisconnectButton(self, event):
+        # lock controls while shutting down worker
+        self._disable_toolbar_controls()
+        self._connect_but.Disable()
+        self._disconnect_but.Disable()
+        text = self._cancelling_text if self._connection_pending else self._disconnecting_text
+        self._disconnect_but.SetLabelText(text)
+        self._connection_pending = False
 
-        # close an already existing logger connection
+        self._controller.kill_logger()
+
+    def OnSavePreset(self, event):
+        if not self._controller.IsLoggerConnected:
+            self.warning_box('Logger Preset', 'Connect to ECU before saving a preset.')
+            return
+
+        with wx.FileDialog(
+            self,
+            'Save Logger Preset',
+            wildcard='XML files (*.xml)|*.xml',
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as file_dlg:
+            if file_dlg.ShowModal() != wx.ID_OK:
+                return
+            fpath = file_dlg.GetPath()
+
+        root = ET.Element('LoggerPreset', version='1')
+        params_node = ET.SubElement(root, 'Parameters')
+        for pid in self._param_panel.get_enabled_param_ids():
+            ET.SubElement(params_node, 'Parameter', id=pid)
+
+        ext_node = ET.SubElement(root, 'ExternalSensors')
+        for sensor_cfg in self._external_sensor_panel.get_preset_data():
+            sensor_node = ET.SubElement(
+                ext_node,
+                'Sensor',
+                type=str(sensor_cfg.get('type', '')),
+                enabled='1' if sensor_cfg.get('enabled', False) else '0',
+            )
+            for key in ['name', 'port', 'baud', 'timeout_ms', 'source']:
+                ET.SubElement(sensor_node, key).text = str(sensor_cfg.get(key, ''))
+
+        tree = ET.ElementTree(root)
+        tree.write(fpath, encoding='utf-8', xml_declaration=True)
+        self.push_status(center='Preset saved', temporary=True)
+
+    def OnImportPreset(self, event):
+        if not self._controller.IsLoggerConnected:
+            self.warning_box('Logger Preset', 'Import preset requires active ECU connection.')
+            return
+
+        with wx.FileDialog(
+            self,
+            'Import Logger Preset',
+            wildcard='XML files (*.xml)|*.xml',
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as file_dlg:
+            if file_dlg.ShowModal() != wx.ID_OK:
+                return
+            fpath = file_dlg.GetPath()
+
+        try:
+            tree = ET.parse(fpath)
+            root = tree.getroot()
+
+            param_ids = [
+                x.attrib.get('id')
+                for x in root.findall('./Parameters/Parameter')
+                if x.attrib.get('id')
+            ]
+
+            sensors = []
+            for snode in root.findall('./ExternalSensors/Sensor'):
+                cfg = {
+                    'type': snode.attrib.get('type', 'AEM X WideBand Series'),
+                    'enabled': snode.attrib.get('enabled', '0') == '1',
+                }
+                for key in ['name', 'port', 'baud', 'timeout_ms', 'source']:
+                    child = snode.find(key)
+                    cfg[key] = child.text if child is not None and child.text is not None else ''
+
+                try:
+                    cfg['timeout_ms'] = int(cfg.get('timeout_ms') or 500)
+                except Exception:
+                    cfg['timeout_ms'] = 500
+                sensors.append(cfg)
+
+            self._param_panel.apply_enabled_param_ids(param_ids)
+            self._controller.update_log_params()
+            self._external_sensor_panel.apply_preset_data(sensors)
+
+        except Exception as e:
+            self.error_box('Import Preset Failed', str(e))
+            return
+
+        self.push_status(center='Preset imported', temporary=True)
+
+    def OnStartLog(self, event):
+        self._start_logging()
+
+    def _start_logging(self):
+        if not self._controller.IsLoggerConnected:
+            self.warning_box('Start Log', 'Connect to ECU before starting CSV log.')
+            return
+
+        try:
+            fpath = self._controller.start_log()
+        except Exception as e:
+            self.error_box('Start Log Failed', str(e))
+            return
+        self._update_logger_menu_state(True)
+        self.push_status(center='CSV logging started: {}'.format(fpath), temporary=True)
+
+    def OnStopLog(self, event):
+        self._stop_logging()
+
+    def _stop_logging(self):
+        if not self._controller.IsLogging:
+            self.warning_box('Stop Log', 'CSV logging is not active.')
+            return
+
+        self._controller.stop_log()
+        self._update_logger_menu_state(self._controller.IsLoggerConnected)
+        self.push_status(center='CSV logging stopped', temporary=True)
+
+    def OnToggleLogButton(self, event):
+        if self._controller.IsLogging:
+            self._stop_logging()
         else:
-            # lock UI controls
-            self._disable_toolbar_controls(connect=True)
-            self._connect_but.SetLabelText('Disconnecting...')
+            self._start_logging()
 
-            self._controller.kill_logger()
+    def OnLoggerPreferences(self, event):
+        dlg = PrefsDialog(self, self._controller.Preferences, sections=['Logger'])
+        dlg.ShowModal()
+        dlg.Destroy()
 
     def OnIdle(self, event):
         self._controller.check_comms()

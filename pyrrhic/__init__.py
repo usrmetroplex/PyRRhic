@@ -26,4 +26,5 @@ sys.path.insert(0,
     os.path.join(submod_dir, 'PyJ2534')
 )
 
-_debug = True
+_debug = False
+_dummydata = True
