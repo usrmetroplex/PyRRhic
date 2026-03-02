@@ -464,11 +464,25 @@ class PyrrhicController(object):
         _logger.debug('Identifier: {}'.format(identifier))
         _logger.debug('Raw Bytes: {}'.format(capabilities.hex()))
 
-        defs = self._defmgr.Definitions[protocol].get(identifier, None)
-        if defs is not None:
+        protocol_defs = self._defmgr.Definitions.get(protocol, {})
+        defs = protocol_defs.get(identifier, None)
 
+        definition = None
+        if defs is not None:
             # for logger init, CALID unimportant, so just pick first definition
             definition = next(iter(defs.values()))
+        else:
+            rrlogger_defs = self._defmgr.RRLoggerDefs.get(protocol, {})
+            logger_def = rrlogger_defs.get(identifier, None)
+            if logger_def is not None:
+                definition = ROMDefinition(LoggerDef=logger_def)
+                _logger.info(
+                    'Matched logger-only definition for endpoint {}'.format(
+                        identifier
+                    )
+                )
+
+        if definition is not None:
             logger_def = definition.LoggerDef
             logger_def.resolve_dependencies(self._defmgr.RRLoggerDefs[protocol])
             logger_def.resolve_valid_params(capabilities)
@@ -481,7 +495,7 @@ class PyrrhicController(object):
             pub.sendMessage('logger.connection.change', translator=self._comms_translator)
 
             # check if a ROM corresponding to the initialized ECU has been loaded
-            if self._roms:
+            if self._roms and defs:
                 loaded_roms = set([
                     x.Definition.EditorID for x in self._roms.values()
                 ])

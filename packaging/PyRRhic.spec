@@ -12,6 +12,9 @@ block_cipher = None
 
 hiddenimports = collect_submodules('pubsub')
 hiddenimports += [
+    'serial',
+    'serial.tools',
+    'serial.tools.list_ports',
     'pyrrhic.tests.comms.phy.phy_mock',
     'pyrrhic.tests.comms.protocol',
     'pyrrhic.tests.comms.protocol.ssm_mock',
